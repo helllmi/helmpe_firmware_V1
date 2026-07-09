@@ -1,0 +1,11 @@
+{
+  "name": "Alert-helpmee_inferencing",
+  "version": "1.0.82",
+  "build": {
+    "srcFilter": [
+      "+<*>",
+      "-<edge-impulse-sdk/CMSIS/DSP/>",
+      "-<edge-impulse-sdk/CMSIS/NN/>"
+    ]
+  }
+}
