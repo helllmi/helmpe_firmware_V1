@@ -17,8 +17,8 @@ extern String topicOtaNotify;
 extern String topicOtaStatus;
 extern String topicLwt;
 extern String topicState;
-extern String topicSos;      // helpme/{id}/sos     ← NOUVEAU
-extern String topicToken;    // helpme/{id}/token    ← NOUVEAU
+extern String topicSos;   // helpme/{id}/sos     ← NOUVEAU
+extern String topicToken; // helpme/{id}/token    ← NOUVEAU
 
 // ============================================================================
 //  API
@@ -52,5 +52,7 @@ bool mqttPublishState(const String &jsonPayload);
 // record_id : UUID v4 généré pour corréler avec l'upload audio qui suit
 bool mqttPublishSos(const String &recordId, double latitude, double longitude,
                     const char *isoTimestamp, float batteryLevel, int rssi);
+// Publie l'état du live stream (idle / connecting / streaming)
+bool mqttPublishStreamState(const char *state, const char *streamId);
 
 #endif

@@ -55,6 +55,7 @@
 //---------------------------------------
 #include "voice_trigger.h"
 #include "i2s_resource.h"
+#include "audio_stream.h"
 
 // ===========================================================================
 //  ÉTAT GLOBAL
@@ -301,6 +302,8 @@ void setup()
     // I2S + Audio
     i2sResource_init();
     audio_init();
+
+    audioStream_init();
 
     // SMS + URC dispatcher + mutex modem
     smsHandler_init();
@@ -602,6 +605,8 @@ void loop()
 
     // ── Gestion du portail captif ───────────────────────────────────────────
     captivePortal_loop();
+    // ── Live stream : publie l'état MQTT sur changement de phase ────────────
+    audioStream_tick();
 
     // ── Boucle de micro-ticks pour réactivité du bouton ─────────────────────
     uint32_t loopEnd = millis() + MAIN_LOOP_DELAY_MS;

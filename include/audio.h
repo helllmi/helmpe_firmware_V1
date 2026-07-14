@@ -25,4 +25,6 @@ uint32_t audio_getLastSeq();
 // Récupère le chemin complet du dernier fichier (pour logs / inclusion JSON)
 const char *audio_getLastFilePath();
 
+size_t audio_streamReadChunk(int16_t *outPcm, size_t maxSamples);
+
 #endif

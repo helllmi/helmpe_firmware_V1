@@ -8,12 +8,14 @@
 #include "jwt_storage.h"
 #include "config.h"
 #include <SD.h>
+#include "audio_stream.h"
 
 // ============================================================================
 //  ÉTAT GLOBAL
 // ============================================================================
 static WiFiClient wifiClient;
 PubSubClient mqtt(wifiClient);
+static void handleControlMessage(byte *payload, unsigned int length);
 
 // Topics (construits depuis DEVICE_ID au mqttBegin)
 String topicAlert;
@@ -24,6 +26,8 @@ String topicLwt;
 String topicState;
 String topicSos;
 String topicToken;
+String topicControl;
+String topicStreamState;
 
 static String mqttBroker;
 static uint16_t mqttPort;
@@ -37,21 +41,26 @@ static void handleTokenMessage(byte *payload, unsigned int length)
 {
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, payload, length);
-    if (err) {
+    if (err)
+    {
         Serial.printf("[MQTT] Token parse error: %s\n", err.c_str());
         return;
     }
 
     const char *newToken = doc["token"];
-    if (newToken && strlen(newToken) > 0) {
+    if (newToken && strlen(newToken) > 0)
+    {
         Serial.printf("[MQTT] Token received (%u chars), saving to NVS...\n", strlen(newToken));
-        if (jwtStorage_save(String(newToken))) {
+        if (jwtStorage_save(String(newToken)))
+        {
             Serial.println("[MQTT] Token updated successfully, rebooting in 3s");
             delay(3000);
-            
+
             ESP.restart();
         }
-    } else {
+    }
+    else
+    {
         Serial.println("[MQTT] Token message missing 'token' field");
     }
 }
@@ -115,11 +124,20 @@ static void onMqttMessage(char *topic, byte *payload, unsigned int length)
 
     String topicStr = String(topic);
 
-    if (topicStr == topicOtaNotify) {
+    if (topicStr == topicOtaNotify)
+    {
         handleOtaMessage(payload, length);
-    } else if (topicStr == topicToken) {
+    }
+    else if (topicStr == topicToken)
+    {
         handleTokenMessage(payload, length);
-    } else {
+    }
+    else if (topicStr == topicControl)
+    {
+        handleControlMessage(payload, length);
+    }
+    else
+    {
         Serial.println("[MQTT] Ignored (unknown topic)");
     }
 }
@@ -146,7 +164,10 @@ void mqttBegin(const char *broker, uint16_t port, const char *deviceId)
     topicSos = String(buf);
     snprintf(buf, sizeof(buf), MQTT_TOPIC_TOKEN_FMT, deviceId);
     topicToken = String(buf);
-
+    snprintf(buf, sizeof(buf), MQTT_TOPIC_CONTROL_FMT, deviceId);
+    topicControl = String(buf);
+    snprintf(buf, sizeof(buf), MQTT_TOPIC_STREAM_STATE_FMT, deviceId);
+    topicStreamState = String(buf);
     mqtt.setServer(mqttBroker.c_str(), mqttPort);
     mqtt.setCallback(onMqttMessage);
     mqtt.setBufferSize(2048); // assez pour le JSON d'alerte (~1500 octets)
@@ -194,8 +215,9 @@ bool connectMqtt()
     mqtt.publish(topicLwt.c_str(), "{\"state\":\"online\"}", true);
     mqtt.subscribe(topicOtaNotify.c_str(), 1);
     mqtt.subscribe(topicToken.c_str(), 1);
-    Serial.printf("[MQTT] Subscribed to %s and %s\n",
-                  topicOtaNotify.c_str(), topicToken.c_str());
+    mqtt.subscribe(topicControl.c_str(), 1);
+    Serial.printf("[MQTT] Subscribed to %s, %s, and %s\n",
+                  topicOtaNotify.c_str(), topicToken.c_str(), topicControl.c_str());
 
     return true;
 }
@@ -306,15 +328,15 @@ bool mqttPublishSos(const String &recordId, double latitude, double longitude,
     }
 
     JsonDocument doc;
-    doc["device_id"]     = deviceIdStr;
-    doc["latitude"]      = latitude;
-    doc["longitude"]     = longitude;
-    doc["alert_type"]    = "sos";
-    doc["timestamp"]     = isoTimestamp;
-    doc["record_id"]     = recordId;
-    doc["is_recording"]  = true;
+    doc["device_id"] = deviceIdStr;
+    doc["latitude"] = latitude;
+    doc["longitude"] = longitude;
+    doc["alert_type"] = "sos";
+    doc["timestamp"] = isoTimestamp;
+    doc["record_id"] = recordId;
+    doc["is_recording"] = true;
     doc["battery_level"] = batteryLevel;
-    doc["rssi"]          = rssi;
+    doc["rssi"] = rssi;
 
     char payload[512];
     size_t payloadLen = serializeJson(doc, payload, sizeof(payload));
@@ -325,11 +347,60 @@ bool mqttPublishSos(const String &recordId, double latitude, double longitude,
                            (const uint8_t *)payload, payloadLen,
                            false); // ephemeral, pas retain
 
-    if (ok) {
+    if (ok)
+    {
         Serial.println("[MQTT] SOS published OK");
         Serial.printf("[MQTT] Payload: %s\n", payload);
-    } else {
+    }
+    else
+    {
         Serial.printf("[MQTT] SOS PUB failed, state=%d\n", mqtt.state());
     }
     return ok;
+}
+// ============================================================================
+//  CONTROL — commandes live stream (backend → device)
+// ============================================================================
+static void handleControlMessage(byte *payload, unsigned int length)
+{
+    StaticJsonDocument<256> doc;
+    if (deserializeJson(doc, payload, length))
+    {
+        Serial.println("[MQTT] Control: invalid JSON");
+        return;
+    }
+
+    const char *cmd = doc["cmd"] | "";
+
+    if (strcmp(cmd, "stream_request") == 0)
+    {
+        const char *sid = doc["stream_id"] | "";
+        Serial.printf("[MQTT] Control: stream_request (stream_id=%s)\n", sid);
+        audioStream_requestStart(sid);
+    }
+    else if (strcmp(cmd, "stream_stop") == 0)
+    {
+        Serial.println("[MQTT] Control: stream_stop");
+        audioStream_requestStop();
+    }
+    else
+    {
+        Serial.printf("[MQTT] Control: unknown cmd '%s'\n", cmd);
+    }
+}
+
+bool mqttPublishStreamState(const char *state, const char *streamId)
+{
+    if (!mqtt.connected())
+        return false;
+
+    StaticJsonDocument<192> doc;
+    doc["device_id"] = deviceIdStr;
+    doc["state"] = state;
+    if (streamId && streamId[0])
+        doc["stream_id"] = streamId;
+
+    char buf[192];
+    size_t n = serializeJson(doc, buf);
+    return mqtt.publish(topicStreamState.c_str(), (const uint8_t *)buf, n, false);
 }

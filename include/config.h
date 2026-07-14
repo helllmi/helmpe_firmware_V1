@@ -146,6 +146,8 @@
 // Topics MQTT (format helpme/%s/... avec %s = DEVICE_ID, snprintf)
 #define MQTT_TOPIC_SOS_FMT   "helpme/%s/sos"
 #define MQTT_TOPIC_TOKEN_FMT "helpme/%s/token"
+#define MQTT_TOPIC_CONTROL_FMT      "helpme/%s/control"        
+#define MQTT_TOPIC_STREAM_STATE_FMT "helpme/%s/stream/state"  
 
 // Serveur d'upload audio (HTTP multipart)
 #define CLOUD_SERVER_HOST   "helpmee.nacloud.tn"

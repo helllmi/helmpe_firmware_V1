@@ -374,6 +374,36 @@ static void recordTask(void *arg)
 }
 
 // ============================================================================
+//  LECTURE I2S NON-BLOQUANTE — pour le live stream 
+// ============================================================================
+
+
+size_t audio_streamReadChunk(int16_t *outPcm, size_t maxSamples)
+{
+    if (recording) return 0;              // Option A : jamais pendant l'enregistrement SOS
+    if (maxSamples == 0) return 0;
+    if (!i2sResource_take()) return 0;    // I2S occupé (voice_trigger) → on renonce ce tick
+
+    static uint8_t raw32[AUDIO_I2S_READ_LEN];
+    size_t wantBytes = maxSamples * 4;                       // 4 octets/sample (32-bit)
+    if (wantBytes > AUDIO_I2S_READ_LEN) wantBytes = AUDIO_I2S_READ_LEN;
+
+    size_t bytesRead = 0;
+    esp_err_t err = i2s_read(I2S_NUM_0, raw32, wantBytes, &bytesRead, 0); // timeout 0 = non bloquant
+    if (err != ESP_OK || bytesRead == 0)
+    {
+        i2sResource_give();
+        return 0;
+    }
+
+    // 32-bit (bytesRead octets) → 16-bit PCM (bytesRead/2 octets = bytesRead/4 samples)
+    i2s_adc_data_scale((uint8_t *)outPcm, raw32, bytesRead);
+    i2sResource_give();
+
+    return bytesRead / 4;                 // nombre de samples int16 écrits
+}
+
+// ============================================================================
 //  API PUBLIQUE
 // ============================================================================
 bool audio_init()
